@@ -37,6 +37,7 @@
 #include <driver/spi_master.h>
 #include "driver/gpio.h"
 #include "sdkconfig.h"
+#include "ble_beacon.hpp" // <<< 追加
 
 #define SDA_PIN      (3)
 #define SCL_PIN      (4)
@@ -93,6 +94,9 @@ extern volatile float Az_bias;
 extern Alt_kalman EstimatedAltitude;
 extern volatile int16_t RawRangeFront;
 extern volatile int16_t RangeFront;
+extern BeaconTracker droneBeaconTracker; // <<< 追加: BeaconTrackerオブジェクト
+extern volatile int beacon_rssi;        // <<< 追加: ビーコンのRSSI値
+// extern volatile float beacon_distance; // 必要であれば距離も
 
 void sensor_init(void);
 float sensor_read(void);

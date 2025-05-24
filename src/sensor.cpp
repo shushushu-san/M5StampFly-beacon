@@ -27,6 +27,7 @@
 #include "imu.hpp"
 #include "tof.hpp"
 #include "flight_control.hpp"
+#include "ble_beacon.hpp" // <<< 追加
 
 Madgwick Drone_ahrs;
 Alt_kalman EstimatedAltitude;
@@ -43,6 +44,10 @@ Filter raw_gx_filter;
 Filter raw_gy_filter;
 Filter raw_gz_filter;
 Filter alt_filter;
+
+BeaconTracker droneBeaconTracker;      // <<< 追加: BeaconTrackerオブジェクトの定義
+volatile int beacon_rssi = -100;       // <<< 追加: RSSI初期値
+// volatile float beacon_distance = 0.0f; // 必要であれば距離も
 
 // Sensor data
 volatile float Roll_angle = 0.0f, Pitch_angle = 0.0f, Yaw_angle = 0.0f;
@@ -143,6 +148,11 @@ void sensor_init() {
     ina3221.reset();
     voltage_filter.set_parameter(0.005, 0.0025);
 
+    // BLEビーコントラッカーの初期化 <<< 追加ブロック
+    USBSerial.println("Initializing Beacon Tracker...");
+    droneBeaconTracker.init();
+    USBSerial.println("Beacon Tracker Initialized.");
+
     uint16_t cnt = 0;
     while (cnt < 10) {
         if (ToF_bottom_data_ready_flag) {
@@ -188,13 +198,33 @@ float sensor_read(void) {
     uint32_t st;
     float sens_interval;
     float h;
-    static float opt_interval = 0.0;
+//    static float opt_interval = 0.0;
 
     st              = micros();
     old_sensor_time = sensor_time;
     sensor_time     = (float)st * 1.0e-6;
     sens_interval   = sensor_time - old_sensor_time;
-    opt_interval    = opt_interval + sens_interval;
+//    opt_interval    = opt_interval + sens_interval;
+
+    // --- BLEビーコン読み取り処理 --- <<< 追加ブロック
+    static uint32_t last_ble_scan_time = 0;
+    uint32_t current_micros_for_ble = micros(); // BLEスキャン用のタイムスタンプ
+
+    // 例: 200msごと (5Hz) にBLEスキャンを実行 (頻度は要調整)
+    if (current_micros_for_ble - last_ble_scan_time > 200000) { // 200ms = 200,000 us
+        last_ble_scan_time = current_micros_for_ble;
+        droneBeaconTracker.startScan(); // 短時間スキャンを実行
+        if (droneBeaconTracker.isBeaconFound()) {
+            beacon_rssi = droneBeaconTracker.getBeaconRSSI();
+            // beacon_distance = droneBeaconTracker.getEstimatedDistance(); // 距離推定を使用する場合
+            // USBSerial.printf("Beacon Found! RSSI: %d\n", beacon_rssi);
+        } else {
+            beacon_rssi = -100; // 未発見時のデフォルトRSSI
+            // beacon_distance = -1.0f;
+            // USBSerial.println("Beacon not found in this scan cycle.");
+        }
+    }
+    // --- BLEビーコン読み取り処理ここまで ---
 
     // 以下では航空工学の座標軸の取り方に従って
     // X軸：前後（前が正）左肩上がりが回転の正

@@ -147,6 +147,15 @@ extern volatile float RearLeft_motor_duty;
 // 速度目標Z
 extern float Z_dot_ref;
 
+// --- ビーコン制御用 --- <<< 追加ブロック
+extern volatile float Target_beacon_rssi;      // 目標RSSI値
+extern volatile float Beacon_rssi_error_pitch; // ピッチ方向のRSSIエラー
+extern volatile float Beacon_rssi_error_roll;  // ロール方向のRSSIエラー (より高度な制御用)
+extern volatile bool  Beacon_hold_mode_active; // ビーコンホールドモード有効フラグ
+// extern PID beacon_pitch_pid; // 必要であれば専用PID
+// extern PID beacon_roll_pid;  // 必要であれば専用PID
+// --- ここまで ---
+
 extern uint8_t Control_mode;
 extern uint8_t Flip_flag;
 extern uint8_t Alt_flag;

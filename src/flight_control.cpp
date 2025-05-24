@@ -199,6 +199,18 @@ Filter Duty_fl;
 Filter Duty_rr;
 Filter Duty_rl;
 
+// --- ビーコン制御用グローバル変数定義 --- <<< 追加ブロック
+volatile float Target_beacon_rssi = -55.0f; // 目標RSSI値 (例: -55dBm, 要調整・キャリブレーション)
+volatile float Beacon_rssi_error_pitch = 0.0f;
+volatile float Beacon_rssi_error_roll = 0.0f;
+volatile bool Beacon_hold_mode_active = false; // 初期状態は無効
+// PID beacon_pitch_pid; // 専用PIDを使用する場合
+// const float beacon_pitch_kp = 0.005f;  // PIDゲイン (超慎重に調整！)
+// const float beacon_pitch_ti = 10.0f;
+// const float beacon_pitch_td = 0.001f;
+// const float beacon_pitch_eta = 0.125f;
+// --- ここまで ---
+
 volatile float Thrust0 = 0.0;
 uint8_t Alt_flag       = 0;
 
@@ -585,6 +597,10 @@ void control_init(void) {
     alt_pid.set_parameter(alt_kp, alt_ti, alt_td, alt_eta, alt_period);
     z_dot_pid.set_parameter(z_dot_kp, z_dot_ti, z_dot_td, alt_eta, alt_period);
 
+    // --- ビーコン制御用PID初期化 (専用PIDを使用する場合) --- <<< 追加ブロック
+    // beacon_pitch_pid.set_parameter(beacon_pitch_kp, beacon_pitch_ti, beacon_pitch_td, beacon_pitch_eta, Control_period);
+    // --- ここまで ---
+
     Duty_fl.set_parameter(0.003, Control_period);
     Duty_fr.set_parameter(0.003, Control_period);
     Duty_rl.set_parameter(0.003, Control_period);
@@ -692,6 +708,14 @@ void get_command(void) {
         Flip_flag = get_flip_button();
         if (Flip_flag == 1) Mode = FLIP_MODE;
     }
+}
+
+// judge_mode_change() や RCからの入力で Beacon_hold_mode_active を制御するロジックが必要
+// 例: RCのAUXスイッチでビーコンホールドモードを切り替え
+void check_beacon_hold_mode_switch() {
+    // Stick[AUX_CHANNEL] の値を見て Beacon_hold_mode_active を true/false する
+    // 例: if (Stick[AUX1] > 0.5) Beacon_hold_mode_active = true; else Beacon_hold_mode_active = false;
+    // この関数を loop_400Hz の適切な場所で呼び出す
 }
 
 #if 0
@@ -1004,6 +1028,46 @@ void angle_control(void) {
             // Get Roll and Pitch angle ref
             Roll_angle_reference  = 0.5f * PI * (Roll_angle_command - Aileron_center);
             Pitch_angle_reference = 0.5f * PI * (Pitch_angle_command - Elevator_center);
+
+            // --- ビーコンホールド制御ロジック --- <<< 追加/変更ブロック
+            // Beacon_hold_mode_active はRCのスイッチ等で別途制御すること
+            if (Beacon_hold_mode_active && droneBeaconTracker.isBeaconFound()) {
+                Led_color = BLUE; // 例: ビーコンホールド中はLED色変更
+
+                // RSSIエラー計算: 目標RSSI - 現在RSSI
+                // 現在RSSIが目標より弱い (より負の大きい値) -> 遠すぎる -> エラー正 -> 前進(ピッチ正)させたい
+                // 現在RSSIが目標より強い (より負の小さい値) -> 近すぎる -> エラー負 -> 後退(ピッチ負)させたい
+                Beacon_rssi_error_pitch = Target_beacon_rssi - (float)beacon_rssi;
+
+                // P制御によるピッチ角調整 (ゲインは超慎重に調整！)
+                // float pitch_adjustment_from_beacon = beacon_pitch_pid.update(Beacon_rssi_error_pitch, Interval_time); // 専用PIDの場合
+                float P_gain_beacon_pitch = 0.008f * PI / 180.0f; // [rad / RSSI unit] このゲインが非常に重要！
+                float pitch_adjustment_from_beacon = Beacon_rssi_error_pitch * P_gain_beacon_pitch;
+
+                // スティックからのピッチ指令をビーコンからの調整値で上書き (または加算)
+                Pitch_angle_reference = pitch_adjustment_from_beacon;
+
+                // 安全のための最大ピッチ角制限
+                float max_pitch_beacon = 10.0f * PI / 180.0f; // 例: 10度
+                if (Pitch_angle_reference > max_pitch_beacon) Pitch_angle_reference = max_pitch_beacon;
+                if (Pitch_angle_reference < -max_pitch_beacon) Pitch_angle_reference = -max_pitch_beacon;
+
+                // ロール方向の制御:
+                // ビーコンの左右方向がわかる場合は同様に Roll_angle_reference も調整
+                // 現状ではRSSIのみなので、ロールはスティック操作または水平維持
+                // Roll_angle_reference = 0; // 水平維持の場合
+                 Roll_angle_reference  = 0.5f * PI * (Roll_angle_command - Aileron_center); // スティック操作を維持
+
+                // USBSerial.printf("BeaconHold: RSSI_err: %.1f, PitchRef_beacon: %.2f deg\n", Beacon_rssi_error_pitch, Pitch_angle_reference * 180.0f/PI);
+
+            } else {
+                // ビーコンホールド無効時またはビーコン未発見時は通常のスティック操作
+                // Pitch_angle_reference は既にスティックベースで計算済み
+                // if (droneBeaconTracker.isBeaconFound() == false) beacon_pitch_pid.reset(); // ビーコンロストでPIDリセット
+                 Led_color = RED; // 例: 通常時は赤
+            }
+            // --- ビーコンホールド制御ロジックここまで ---
+
             if (Roll_angle_reference > (30.0f * PI / 180.0f)) Roll_angle_reference = 30.0f * PI / 180.0f;
             if (Roll_angle_reference < -(30.0f * PI / 180.0f)) Roll_angle_reference = -30.0f * PI / 180.0f;
             if (Pitch_angle_reference > (30.0f * PI / 180.0f)) Pitch_angle_reference = 30.0f * PI / 180.0f;
